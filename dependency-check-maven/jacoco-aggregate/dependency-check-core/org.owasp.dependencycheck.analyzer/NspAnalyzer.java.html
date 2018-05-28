@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>NspAnalyzer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Dependency-Check Maven Plugin</a> &gt; <a href="../index.html" class="el_bundle">dependency-check-core</a> &gt; <a href="index.source.html" class="el_package">org.owasp.dependencycheck.analyzer</a> &gt; <span class="el_source">NspAnalyzer.java</span></div><h1>NspAnalyzer.java</h1><pre class="source lang-java linenums">/*
+ * This file is part of dependency-check-core.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright (c) 2017 Steve Springett. All Rights Reserved.
+ */
+package org.owasp.dependencycheck.analyzer;
+
+import org.apache.commons.io.FileUtils;
+import org.owasp.dependencycheck.Engine;
+import org.owasp.dependencycheck.analyzer.exception.AnalysisException;
+import org.owasp.dependencycheck.data.nsp.Advisory;
+import org.owasp.dependencycheck.data.nsp.NspSearch;
+import org.owasp.dependencycheck.data.nsp.SanitizePackage;
+import org.owasp.dependencycheck.dependency.Dependency;
+import org.owasp.dependencycheck.dependency.Vulnerability;
+import org.owasp.dependencycheck.dependency.VulnerableSoftware;
+import org.owasp.dependencycheck.utils.FileFilterBuilder;
+import org.owasp.dependencycheck.utils.Settings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.io.File;
+import java.io.FileFilter;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import javax.annotation.concurrent.ThreadSafe;
+import javax.json.Json;
+import javax.json.JsonException;
+import javax.json.JsonObject;
+import javax.json.JsonObjectBuilder;
+import javax.json.JsonReader;
+import org.owasp.dependencycheck.analyzer.exception.SearchException;
+import org.owasp.dependencycheck.exception.InitializationException;
+import org.owasp.dependencycheck.utils.InvalidSettingException;
+import org.owasp.dependencycheck.utils.URLConnectionFailureException;
+
+/**
+ * Used to analyze Node Package Manager (npm) package.json files via Node
+ * Security Platform (nsp).
+ *
+ * @author Steve Springett
+ */
+@ThreadSafe
+<span class="fc" id="L58">public class NspAnalyzer extends AbstractNpmAnalyzer {</span>
+
+    /**
+     * The logger.
+     */
+<span class="fc" id="L63">    private static final Logger LOGGER = LoggerFactory.getLogger(NspAnalyzer.class);</span>
+
+    /**
+     * The default URL to the NSP check API.
+     */
+    public static final String DEFAULT_URL = &quot;https://api.nodesecurity.io/check&quot;;
+    /**
+     * A descriptor for the type of dependencies processed or added by this
+     * analyzer.
+     */
+    public static final String DEPENDENCY_ECOSYSTEM = NPM_DEPENDENCY_ECOSYSTEM;
+    /**
+     * The file name to scan.
+     */
+    private static final String PACKAGE_JSON = &quot;package.json&quot;;
+
+    /**
+     * Filter that detects files named &quot;package.json&quot;.
+     */
+<span class="fc" id="L82">    private static final FileFilter PACKAGE_JSON_FILTER = FileFilterBuilder.newInstance()</span>
+            .addFilenames(PACKAGE_JSON).build();
+
+    /**
+     * The NSP Searcher.
+     */
+    private NspSearch searcher;
+
+    /**
+     * Returns the FileFilter
+     *
+     * @return the FileFilter
+     */
+    @Override
+    protected FileFilter getFileFilter() {
+<span class="fc" id="L97">        return PACKAGE_JSON_FILTER;</span>
+    }
+
+    /**
+     * Initializes the analyzer once before any analysis is performed.
+     *
+     * @param engine a reference to the dependency-check engine
+     * @throws InitializationException if there's an error during initialization
+     */
+    @Override
+    public void prepareFileTypeAnalyzer(Engine engine) throws InitializationException {
+<span class="fc" id="L108">        LOGGER.debug(&quot;Initializing {}&quot;, getName());</span>
+        try {
+<span class="fc" id="L110">            searcher = new NspSearch(getSettings());</span>
+<span class="nc" id="L111">        } catch (MalformedURLException ex) {</span>
+<span class="nc" id="L112">            setEnabled(false);</span>
+<span class="nc" id="L113">            throw new InitializationException(&quot;The configured URL to Node Security Platform is malformed&quot;, ex);</span>
+<span class="fc" id="L114">        }</span>
+        try {
+<span class="fc" id="L116">            final Settings settings = engine.getSettings();</span>
+<span class="fc" id="L117">            final boolean nodeEnabled = settings.getBoolean(Settings.KEYS.ANALYZER_NODE_PACKAGE_ENABLED);</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">            if (!nodeEnabled) {</span>
+<span class="nc" id="L119">                LOGGER.warn(&quot;The Node Package Analyzer has been disabled; the resulting report will only &quot;</span>
+                        + &quot; contain the known vulnerable dependency - not a bill of materials for the node project.&quot;);
+            }
+<span class="nc" id="L122">        } catch (InvalidSettingException ex) {</span>
+<span class="nc" id="L123">            throw new InitializationException(&quot;Unable to read configuration settings&quot;, ex);</span>
+<span class="fc" id="L124">        }</span>
+<span class="fc" id="L125">    }</span>
+
+    /**
+     * Returns the name of the analyzer.
+     *
+     * @return the name of the analyzer.
+     */
+    @Override
+    public String getName() {
+<span class="fc" id="L134">        return &quot;Node Security Platform Analyzer&quot;;</span>
+    }
+
+    /**
+     * Returns the phase that the analyzer is intended to run in.
+     *
+     * @return the phase that the analyzer is intended to run in.
+     */
+    @Override
+    public AnalysisPhase getAnalysisPhase() {
+<span class="fc" id="L144">        return AnalysisPhase.FINDING_ANALYSIS;</span>
+    }
+
+    /**
+     * Returns the key used in the properties file to determine if the analyzer
+     * is enabled.
+     *
+     * @return the enabled property setting key for the analyzer
+     */
+    @Override
+    protected String getAnalyzerEnabledSettingKey() {
+<span class="fc" id="L155">        return Settings.KEYS.ANALYZER_NSP_PACKAGE_ENABLED;</span>
+    }
+
+    @Override
+    protected void analyzeDependency(Dependency dependency, Engine engine) throws AnalysisException {
+<span class="fc" id="L160">        engine.removeDependency(dependency);</span>
+<span class="fc" id="L161">        final File file = dependency.getActualFile();</span>
+<span class="pc bpc" id="L162" title="2 of 6 branches missed.">        if (!file.isFile() || file.length() == 0 || !shouldProcess(file)) {</span>
+<span class="fc" id="L163">            return;</span>
+        }
+
+<span class="pc" id="L166">        try (JsonReader jsonReader = Json.createReader(FileUtils.openInputStream(file))) {</span>
+
+            // Retrieves the contents of package.json from the Dependency
+<span class="fc" id="L169">            final JsonObject packageJson = jsonReader.readObject();</span>
+
+            // Create a sanitized version of the package.json
+<span class="fc" id="L172">            final JsonObject sanitizedJson = SanitizePackage.sanitize(packageJson);</span>
+
+            // Create a new 'package' object that acts as a container for the sanitized package.json
+<span class="fc" id="L175">            final JsonObjectBuilder builder = Json.createObjectBuilder();</span>
+<span class="fc" id="L176">            final JsonObject nspPayload = builder.add(&quot;package&quot;, sanitizedJson).build();</span>
+
+            // Submits the package payload to the nsp check service
+<span class="fc" id="L179">            final List&lt;Advisory&gt; advisories = searcher.submitPackage(nspPayload);</span>
+
+<span class="fc bfc" id="L181" title="All 2 branches covered.">            for (Advisory advisory : advisories) {</span>
+                /*
+                 * Create a new vulnerability out of the advisory returned by nsp.
+                 */
+<span class="fc" id="L185">                final Vulnerability vuln = new Vulnerability();</span>
+<span class="fc" id="L186">                vuln.setCvssScore(advisory.getCvssScore());</span>
+<span class="fc" id="L187">                vuln.setDescription(advisory.getOverview());</span>
+<span class="fc" id="L188">                vuln.setName(String.valueOf(advisory.getId()));</span>
+<span class="fc" id="L189">                vuln.setSource(Vulnerability.Source.NSP);</span>
+<span class="fc" id="L190">                vuln.addReference(</span>
+                        &quot;NSP&quot;,
+                        &quot;Advisory &quot; + advisory.getId() + &quot;: &quot; + advisory.getTitle(),
+                        advisory.getAdvisory()
+                );
+
+                /*
+                 * Create a single vulnerable software object - these do not use CPEs unlike the NVD.
+                 */
+<span class="fc" id="L199">                final VulnerableSoftware vs = new VulnerableSoftware();</span>
+                //TODO consider changing this to available versions on the dependency
+                //  - the update is a part of the version, not versions to update to
+                //vs.setUpdate(advisory.getPatchedVersions());
+
+<span class="fc" id="L204">                vs.setName(advisory.getModule() + &quot;:&quot; + advisory.getVulnerableVersions());</span>
+<span class="fc" id="L205">                vuln.setVulnerableSoftware(new HashSet&lt;&gt;(Arrays.asList(vs)));</span>
+
+<span class="fc" id="L207">                final Dependency existing = findDependency(engine, advisory.getModule(), advisory.getVersion());</span>
+<span class="fc bfc" id="L208" title="All 2 branches covered.">                if (existing == null) {</span>
+<span class="fc" id="L209">                    final Dependency nodeModule = createDependency(dependency, advisory.getModule(), advisory.getVersion(), &quot;transitive&quot;);</span>
+<span class="fc" id="L210">                    nodeModule.addVulnerability(vuln);</span>
+<span class="fc" id="L211">                    engine.addDependency(nodeModule);</span>
+<span class="fc" id="L212">                } else {</span>
+<span class="fc" id="L213">                    existing.addVulnerability(vuln);</span>
+                }
+<span class="fc" id="L215">            }</span>
+<span class="pc bpc" id="L216" title="6 of 8 branches missed.">        } catch (URLConnectionFailureException e) {</span>
+<span class="nc" id="L217">            this.setEnabled(false);</span>
+<span class="nc" id="L218">            throw new AnalysisException(&quot;Failed to connect to the Node Security Project (NspAnalyzer); the analyzer is being disabled and may result in false negatives.&quot;, e);</span>
+<span class="nc" id="L219">        } catch (IOException e) {</span>
+<span class="nc" id="L220">            LOGGER.debug(&quot;Error reading dependency or connecting to Node Security Platform - check API&quot;, e);</span>
+<span class="nc" id="L221">            this.setEnabled(false);</span>
+<span class="nc" id="L222">            throw new AnalysisException(&quot;Failed to read results from the Node Security Project (NspAnalyzer); the analyzer is being disabled and may result in false negatives.&quot;, e);</span>
+<span class="nc" id="L223">        } catch (JsonException e) {</span>
+<span class="nc" id="L224">            throw new AnalysisException(String.format(&quot;Failed to parse %s file from the Node Security Platform (NspAnalyzer).&quot;, file.getPath()), e);</span>
+<span class="nc" id="L225">        } catch (SearchException ex) {</span>
+<span class="nc" id="L226">            LOGGER.error(&quot;NspAnalyzer failed on {}&quot;, dependency.getActualFilePath());</span>
+<span class="nc" id="L227">            throw ex;</span>
+<span class="fc" id="L228">        }</span>
+<span class="fc" id="L229">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.7.9.201702052155</span></div></body></html>
